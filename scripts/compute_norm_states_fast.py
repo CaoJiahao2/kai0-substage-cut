@@ -69,13 +69,26 @@ def main(config_name: str, base_dir: str | None = None, max_frames: int | None =
     data_config = config.data.create(config.assets_dirs, config.model)
     action_dim = config.model.action_dim
     
-    # Determine base directory
+    # Determine base directory.
+    # Prefer explicit --base-dir, then data_config.root (local dataset path),
+    # and only then repo_id when it is itself a local path.
     if base_dir is None:
-        if data_config.repo_id is None:
-            raise ValueError("Either base_dir must be provided or config must have repo_id")
-        # Use repo_id as base directory (it contains the full path)
-        base_dir = data_config.repo_id
-        print(f"Auto-detected base directory from config: {base_dir}")
+        if data_config.root:
+            base_dir = data_config.root
+            print(f"Auto-detected base directory from config.root: {base_dir}")
+        elif data_config.repo_id:
+            repo_path = Path(data_config.repo_id).expanduser()
+            if repo_path.exists():
+                base_dir = str(repo_path)
+                print(f"Auto-detected base directory from local repo_id path: {base_dir}")
+            else:
+                raise ValueError(
+                    "Could not determine local dataset directory. "
+                    f"repo_id='{data_config.repo_id}' looks like a Hub id, not a local path. "
+                    "Please pass --base-dir or set data.root in the config."
+                )
+        else:
+            raise ValueError("Either base_dir must be provided or config must have a local root/path")
     
     base_path = Path(base_dir)
     if not base_path.exists():
@@ -223,4 +236,3 @@ def main(config_name: str, base_dir: str | None = None, max_frames: int | None =
 
 if __name__ == "__main__":
     tyro.cli(main)
-

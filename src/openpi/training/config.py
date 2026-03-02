@@ -68,6 +68,10 @@ class AssetsConfig:
 class DataConfig:
     # LeRobot repo id. If None, fake data will be created.
     repo_id: str | None = None
+    # Optional local root directory for the dataset (when repo_id refers to a Hub dataset).
+    root: str | None = None
+    # Optional subset of episode indices to load from the dataset.
+    episodes: list[int] | None = None
     # Directory within the assets directory containing the data assets.
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
@@ -170,6 +174,8 @@ class ModelTransformFactory(GroupFactory):
 class DataConfigFactory(abc.ABC):
     # The LeRobot repo id.
     repo_id: str = tyro.MISSING
+    # Optional local root directory for the dataset (when repo_id is a Hub dataset).
+    root: str | None = None
     # Determines how the assets will be loaded.
     assets: AssetsConfig = dataclasses.field(default_factory=AssetsConfig)
     # Base config that will be updated by the factory.
@@ -185,6 +191,7 @@ class DataConfigFactory(abc.ABC):
         return dataclasses.replace(
             self.base_config or DataConfig(),
             repo_id=repo_id,
+            root=self.root,
             asset_id=asset_id,
             norm_stats=self._load_norm_stats(epath.Path(self.assets.assets_dir or assets_dirs), asset_id),
             use_quantile_norm=model_config.model_type not in (ModelType.PI0, ModelType.PI0_RTC),
@@ -1059,6 +1066,7 @@ _CONFIGS = [
         keep_period=20_000,
         num_workers=0,  # Important: RLDS DataLoader requires num_workers=0, handles multi-processing internally
     ),
+
     TrainConfig(
         # This config is for fine-tuning pi05 on the *full* DROID dataset.
         # We use RLDS data loading to make training on this large dataset tractable.
@@ -1093,6 +1101,7 @@ _CONFIGS = [
         keep_period=10_000,
         num_workers=0,  # Important: RLDS DataLoader requires num_workers=0, handles multi-processing internally
     ),
+
     TrainConfig(
         # This config is for fine-tuning pi05-DROID on a custom (smaller) DROID dataset.
         # Here, we use LeRobot data format (like for all other fine-tuning examples)
@@ -1186,6 +1195,56 @@ _CONFIGS = [
         keep_period=5000,
         num_workers=8,
         batch_size=256,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper",
+        model=pi0_config.Pi0Config(pi05=True),
+        data = LerobotAgilexDataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/home/ubuntu/Data/Kai0_newdataset/Task_A/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/ubuntu/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=80_000,
+        keep_period=5000,
+        num_workers=32,
+        batch_size=128,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data = LerobotAgilexDataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/home/ubuntu/Data/Kai0_newdataset/Task_A/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/ubuntu/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=80_000,
+        keep_period=5000,
+        num_workers=16,
+        batch_size=16,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
     ),
     TrainConfig(
         name="pi05_tee_shirt_sort_normal",

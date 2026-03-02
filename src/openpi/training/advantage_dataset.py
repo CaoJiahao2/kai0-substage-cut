@@ -1,4 +1,4 @@
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 import random
 from pathlib import Path
 from typing import Callable

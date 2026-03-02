@@ -62,6 +62,34 @@ def test_with_fake_dataset():
         assert actions.shape == (config.batch_size, config.model.action_horizon, config.model.action_dim)
 
 
+def test_torch_data_loader_skips_unreadable_samples():
+    config = pi0_config.Pi0Config(action_dim=24, action_horizon=50, max_token_len=48)
+    base_dataset = _data_loader.FakeDataset(config, 8)
+
+    class BrokenDataset:
+        def __len__(self):
+            return len(base_dataset)
+
+        def __getitem__(self, index):
+            idx = index.__index__()
+            if idx in {0, 3}:
+                raise OSError("corrupted video frame")
+            return base_dataset[idx]
+
+    safe_dataset = _data_loader.FaultTolerantDataset(BrokenDataset())
+    loader = _data_loader.TorchDataLoader(
+        safe_dataset,
+        local_batch_size=4,
+        num_batches=1,
+    )
+
+    batches = list(loader)
+
+    assert len(batches) == 1
+    batch = batches[0]
+    assert all(x.shape[0] == 4 for x in jax.tree.leaves(batch))
+
+
 def test_with_real_dataset():
     config = _config.get_config("pi0_aloha_sim")
     config = dataclasses.replace(config, batch_size=4)

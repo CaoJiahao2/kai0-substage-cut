@@ -2,12 +2,13 @@ from collections.abc import Iterator, Sequence
 import logging
 import multiprocessing
 import os
+import pathlib
 import typing
 from typing import Literal, Protocol, SupportsIndex, TypeVar
 
 import jax
 import jax.numpy as jnp
-import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
+import lerobot.datasets.lerobot_dataset as lerobot_dataset
 import numpy as np
 import torch
 
@@ -61,6 +62,45 @@ class TransformedDataset(Dataset[T_co]):
 
     def __len__(self) -> int:
         return len(self._dataset)
+
+
+class FaultTolerantDataset(Dataset[T_co]):
+    """Wrap a random-access dataset and skip unreadable samples."""
+
+    def __init__(self, dataset: Dataset[T_co]):
+        self._dataset = dataset
+        self._size = len(dataset)
+        self._skipped_count = 0
+
+    def __getitem__(self, index: SupportsIndex) -> T_co:
+        if self._size == 0:
+            raise IndexError("Cannot read from an empty dataset.")
+
+        start_idx = index.__index__() % self._size
+        first_error: Exception | None = None
+
+        for offset in range(self._size):
+            idx = (start_idx + offset) % self._size
+            try:
+                return self._dataset[idx]
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+                self._skipped_count += 1
+                logging.warning(
+                    "Skipping unreadable dataset sample (requested_index=%d, failed_index=%d, skipped_total=%d): %s",
+                    start_idx,
+                    idx,
+                    self._skipped_count,
+                    exc,
+                )
+                if self._skipped_count % 100 == 0:
+                    logging.info("FaultTolerantDataset has skipped %d unreadable samples so far.", self._skipped_count)
+
+        raise RuntimeError("All dataset samples failed to load.") from first_error
+
+    def __len__(self) -> int:
+        return self._size
 
 
 class IterableTransformedDataset(IterableDataset[T_co]):
@@ -128,6 +168,29 @@ class FakeDataset(Dataset):
         return self._num_samples
 
 
+def _create_lerobot_dataset_compat(dataset_cls, *args, **kwargs):
+    try:
+        return dataset_cls(*args, **kwargs)
+    except TypeError as exc:
+        message = str(exc)
+        if "stack(): argument 'tensors'" not in message or "Column" not in message:
+            raise
+        # Older lerobot versions expect list[Tensor] but datasets returns Column.
+        # Patch torch.stack just for dataset construction.
+        orig_stack = torch.stack
+
+        def stack_compat(tensors, *stack_args, **stack_kwargs):
+            if tensors.__class__.__name__ == "Column":
+                tensors = [torch.as_tensor(t) for t in list(tensors)]
+            return orig_stack(tensors, *stack_args, **stack_kwargs)
+
+        torch.stack = stack_compat
+        try:
+            return dataset_cls(*args, **kwargs)
+        finally:
+            torch.stack = orig_stack
+
+
 def create_torch_dataset(
     data_config: _config.DataConfig, action_horizon: int, model_config: _model.BaseModelConfig
 ) -> Dataset:
@@ -138,9 +201,19 @@ def create_torch_dataset(
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
 
-    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
-    dataset = lerobot_dataset.LeRobotDataset(
-        data_config.repo_id,
+    root = data_config.root
+    if repo_id is not None:
+        repo_path = pathlib.Path(repo_id).expanduser()
+        if root is None and repo_path.exists():
+            root = str(repo_path.resolve())
+            repo_id = repo_path.name
+
+    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
+    dataset = _create_lerobot_dataset_compat(
+        lerobot_dataset.LeRobotDataset,
+        repo_id,
+        root=root,
+        episodes=data_config.episodes,
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },
@@ -167,9 +240,18 @@ def create_advantage_torch_dataset(
         return FakeDataset(model_config, num_samples=1024)
     
    
-    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
-    dataset = AdvantageLerobotDataset(
+    root = data_config.root
+    if repo_id is not None:
+        repo_path = pathlib.Path(repo_id).expanduser()
+        if root is None and repo_path.exists():
+            root = str(repo_path.resolve())
+            repo_id = repo_path.name
+
+    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
+    dataset = _create_lerobot_dataset_compat(
+        AdvantageLerobotDataset,
         repo_id=repo_id,
+        root=root,
         episodes=episodes_split_through_task(repo_id, split_type=split, shuffle=False),
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
@@ -368,6 +450,7 @@ def create_torch_data_loader(
     else:
         dataset = create_torch_dataset(data_config, action_horizon, model_config)
     dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
+    dataset = FaultTolerantDataset(dataset)
 
     # Use TorchDataLoader for both frameworks
     # For PyTorch DDP, create DistributedSampler and divide batch size by world size

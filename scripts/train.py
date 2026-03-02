@@ -194,6 +194,33 @@ def train_step(
     return new_state, info
 
 
+@at.typecheck
+def compute_action_l1_metrics(
+    config: _config.TrainConfig,
+    rng: at.KeyArrayLike,
+    state: training_utils.TrainState,
+    batch: tuple[_model.Observation, _model.Actions],
+) -> dict[str, at.Float[at.Array, ""]]:
+    """Compute train-batch L1 metrics for monitoring."""
+    model = nnx.merge(state.model_def, state.params)
+    model.eval()
+    observation, actions = batch
+    pred_actions = model.sample_actions(rng, observation, num_steps=10)
+    pred_actions = jnp.asarray(pred_actions, dtype=jnp.float32)
+    actions = jnp.asarray(actions, dtype=jnp.float32)
+    pred_actions_14 = pred_actions[..., :14]
+    actions_14 = actions[..., :14]
+    abs_err_14 = jnp.abs(pred_actions_14 - actions_14)
+
+    # Exclude gripper dimensions: left=6, right=13.
+    joint_abs_err = jnp.concatenate([abs_err_14[..., :6], abs_err_14[..., 7:13]], axis=-1)
+
+    return {
+        "L1_loss": jnp.mean(abs_err_14),
+        "joint_l1_loss": jnp.mean(joint_abs_err),
+    }
+
+
 def main(config: _config.TrainConfig):
     init_logging()
     logging.info(f"Running on: {platform.node()}")
@@ -220,7 +247,7 @@ def main(config: _config.TrainConfig):
     )
     
     dst_dir = config.checkpoint_dir
-    src_file = Path(config.data.repo_id) / 'norm_stats.json'
+    src_file = Path("assets/"+config.name)/Path(config.data.repo_id) / 'norm_stats.json'
     shutil.copy(src_file, dst_dir)
 
     init_wandb(config, resuming=resuming, enabled=config.wandb_enabled)
@@ -254,6 +281,11 @@ def main(config: _config.TrainConfig):
         out_shardings=(train_state_sharding, replicated_sharding),
         donate_argnums=(1,),
     )
+    pcompute_action_l1_metrics = jax.jit(
+        functools.partial(compute_action_l1_metrics, config),
+        in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
+        out_shardings=replicated_sharding,
+    )
 
     start_step = int(train_state.step)
     pbar = tqdm.tqdm(
@@ -271,6 +303,9 @@ def main(config: _config.TrainConfig):
         if step % config.log_interval == 0:
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
+            metric_rng = jax.random.fold_in(train_rng, step + 1_000_000)
+            l1_metrics = pcompute_action_l1_metrics(metric_rng, train_state, batch)
+            reduced_info.update({k: float(v) for k, v in jax.device_get(l1_metrics).items()})
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
             pbar.write(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
@@ -278,7 +313,7 @@ def main(config: _config.TrainConfig):
         batch = next(data_iter)
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
-            _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step, config.save_train_state)
+            _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step)
 
     logging.info("Waiting for checkpoint manager to finish")
     checkpoint_manager.wait_until_finished()
