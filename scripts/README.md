@@ -1,4 +1,13 @@
 # 可视化代码
+
+**step1**: 
+
+git clone https://github.com/agilexrobotics/mobile_aloha_sim_ros2.git
+
+
+**step2**:
+修改 rerun_dataset_viz.py 中的变量 DEFAULT_URDF_ROOT 为上面clone 的仓库的路径
+
 python scripts/rerun_dataset_viz.py \
   --repo-id "/path/to/Task_A/base" \
   --episode-index 0 \
