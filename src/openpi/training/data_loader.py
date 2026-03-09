@@ -450,7 +450,7 @@ def create_torch_data_loader(
     else:
         dataset = create_torch_dataset(data_config, action_horizon, model_config)
     dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
-    dataset = FaultTolerantDataset(dataset)
+    #dataset = FaultTolerantDataset(dataset)
 
     # Use TorchDataLoader for both frameworks
     # For PyTorch DDP, create DistributedSampler and divide batch size by world size
