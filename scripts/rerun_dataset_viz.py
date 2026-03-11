@@ -176,6 +176,21 @@ def _supports_rr_timeless() -> bool:
 _RR_SUPPORTS_TIMELESS = _supports_rr_timeless() if rr is not None else False
 
 
+def _validate_rerun_module() -> None:
+    if rr is None:
+        raise RuntimeError("rerun is required. Please install `rerun-sdk`.") from _RERUN_IMPORT_ERROR
+    required_attrs = ("init", "log", "set_time", "Image", "Points3D")
+    missing = [name for name in required_attrs if not hasattr(rr, name)]
+    if missing:
+        module_path = getattr(rr, "__file__", "<unknown>")
+        raise RuntimeError(
+            "Imported `rerun` module is incompatible (missing: "
+            f"{', '.join(missing)}). Loaded from: {module_path}. "
+            "This usually means a wrong package named `rerun` is installed. "
+            "Fix with: `pip uninstall -y rerun && pip install -U rerun-sdk`."
+        )
+
+
 def _rr_log(entity_path: str, data: Any, *, timeless: bool = False) -> None:
     if timeless and _RR_SUPPORTS_TIMELESS:
         rr.log(entity_path, data, timeless=True)
@@ -502,7 +517,7 @@ def _visualize_dataset(
     rr.init(f"{repo_id}/episode_{episode_index}", spawn=spawn_local_viewer)
     gc.collect()
     if mode == "distant":
-        rr.serve_web_viewer(open_browser=False, web_port=web_port, ws_port=ws_port)
+        rr.serve_web_viewer(open_browser=False, web_port=web_port)
 
     camera_keys = list(getattr(dataset.meta, "camera_keys", []))
     if not camera_keys:
@@ -717,8 +732,7 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
-    if rr is None:
-        raise RuntimeError("rerun is required. Please install `rerun-sdk`.") from _RERUN_IMPORT_ERROR
+    _validate_rerun_module()
     if torch is None:
         raise RuntimeError("torch is required in this environment.") from _TORCH_IMPORT_ERROR
     if tqdm is None:
