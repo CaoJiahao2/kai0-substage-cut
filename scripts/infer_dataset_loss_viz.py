@@ -16,6 +16,7 @@ import io
 import json
 import logging
 import re
+import string
 import sys
 import tempfile
 import time
@@ -115,7 +116,7 @@ except Exception as exc:  # pragma: no cover - runtime dependency
     _MATPLOTLIB_IMPORT_ERROR = exc
 
 
-DEFAULT_URDF_ROOT = Path("/home/magiclab/projects/mobile_aloha_sim_ros2")
+DEFAULT_URDF_ROOT = Path("/home/magiclab/chenxuhua/Codes/mobile_aloha_sim_ros2")
 DEFAULT_URDF_PATH = DEFAULT_URDF_ROOT / "aloha_new_description/urdf/aloha_new.urdf"
 DEFAULT_CAMERA_MAP = (
     "top_head=observation.images.top_head,"
@@ -260,6 +261,7 @@ class _LocalKai0Dataset:
         self.info = json.loads((self.root / "meta/info.json").read_text())
         self.features = self.info.get("features", {})
         self.fps = int(self.info["fps"])
+        self.chunks_size = int(self.info.get("chunks_size", 1000))
         self._tasks_map = self._load_tasks_map()
         self.meta = SimpleNamespace(tasks=self._tasks_map)
         self._episode_rows = self._read_episode_rows()
@@ -281,6 +283,29 @@ class _LocalKai0Dataset:
         self._len = running
         self._table_cache: dict[Path, dict[str, list[Any]]] = {}
         self._video_cache: dict[Path, _SequentialVideoReader] = {}
+
+    def _format_path_template(self, template: str, row: dict[str, Any], camera_key: str | None = None) -> Path:
+        fields = {field_name for _, field_name, _, _ in string.Formatter().parse(template) if field_name}
+        episode_index = int(row["episode_index"])
+        episode_chunk = episode_index // self.chunks_size
+        values: dict[str, Any] = {
+            "episode_index": episode_index,
+            "episode_chunk": episode_chunk,
+            "chunk_index": int(row.get("data/chunk_index", episode_chunk)),
+            "file_index": int(row.get("data/file_index", episode_index)),
+        }
+        if camera_key is not None:
+            values["video_key"] = camera_key
+            values["chunk_index"] = int(row.get(f"videos/{camera_key}/chunk_index", values["chunk_index"]))
+            values["file_index"] = int(row.get(f"videos/{camera_key}/file_index", values["file_index"]))
+
+        missing = [name for name in fields if name not in values]
+        if missing:
+            raise KeyError(
+                f"Unsupported path template fields {missing!r} in {template!r}. "
+                f"Available fields: {sorted(values)}"
+            )
+        return self.root / template.format(**values)
 
     def _load_tasks_map(self) -> dict[int, str]:
         tasks_parquet = self.root / "meta/tasks.parquet"
@@ -312,35 +337,26 @@ class _LocalKai0Dataset:
         rows.sort(key=lambda item: int(item["episode_index"]))
         return rows
 
-    def _build_file_start_indices(self) -> tuple[dict[tuple[int, int], int], dict[tuple[str, int, int], int]]:
-        data_starts: dict[tuple[int, int], int] = {}
-        video_starts: dict[tuple[str, int, int], int] = {}
+    def _build_file_start_indices(self) -> tuple[dict[Path, int], dict[Path, int]]:
+        data_starts: dict[Path, int] = {}
+        video_starts: dict[Path, int] = {}
         camera_keys = [key for key, spec in self.features.items() if spec.get("dtype") == "video"]
         for row in self._episode_rows:
-            data_key = (int(row["data/chunk_index"]), int(row["data/file_index"]))
+            data_path = self._data_file_path(row)
             data_start = int(row["dataset_from_index"])
-            data_starts[data_key] = min(data_starts.get(data_key, data_start), data_start)
+            data_starts[data_path] = min(data_starts.get(data_path, data_start), data_start)
             for camera_key in camera_keys:
-                chunk_key = f"videos/{camera_key}/chunk_index"
-                file_key = f"videos/{camera_key}/file_index"
                 from_key = f"videos/{camera_key}/from_timestamp"
-                video_key = (camera_key, int(row[chunk_key]), int(row[file_key]))
+                video_path = self._video_file_path(row, camera_key)
                 video_start = int(round(float(row[from_key]) * self.fps))
-                video_starts[video_key] = min(video_starts.get(video_key, video_start), video_start)
+                video_starts[video_path] = min(video_starts.get(video_path, video_start), video_start)
         return data_starts, video_starts
 
     def _data_file_path(self, row: dict[str, Any]) -> Path:
-        return self.root / self.info["data_path"].format(
-            chunk_index=int(row["data/chunk_index"]),
-            file_index=int(row["data/file_index"]),
-        )
+        return self._format_path_template(self.info["data_path"], row)
 
     def _video_file_path(self, row: dict[str, Any], camera_key: str) -> Path:
-        return self.root / self.info["video_path"].format(
-            video_key=camera_key,
-            chunk_index=int(row[f"videos/{camera_key}/chunk_index"]),
-            file_index=int(row[f"videos/{camera_key}/file_index"]),
-        )
+        return self._format_path_template(self.info["video_path"], row, camera_key=camera_key)
 
     def _load_table(self, data_path: Path) -> dict[str, list[Any]]:
         if data_path in self._table_cache:
@@ -380,8 +396,7 @@ class _LocalKai0Dataset:
         data_path = self._data_file_path(row)
         data = self._load_table(data_path)
 
-        data_key = (int(row["data/chunk_index"]), int(row["data/file_index"]))
-        data_base = self._data_file_starts[data_key]
+        data_base = self._data_file_starts[data_path]
         row_index = int(row["dataset_from_index"]) - data_base + rel_index
 
         sample: dict[str, Any] = {key: value[row_index] for key, value in data.items()}
@@ -398,8 +413,7 @@ class _LocalKai0Dataset:
             if reader is None:
                 reader = _SequentialVideoReader(video_path)
                 self._video_cache[video_path] = reader
-            video_key = (camera_key, int(row[f"videos/{camera_key}/chunk_index"]), int(row[f"videos/{camera_key}/file_index"]))
-            frame_base = self._video_file_starts[video_key]
+            frame_base = self._video_file_starts[video_path]
             start_frame = int(round(float(row[f"videos/{camera_key}/from_timestamp"]) * self.fps)) - frame_base
             sample[camera_key] = reader.read(start_frame + frame_index)
 
@@ -849,6 +863,23 @@ def _init_rerun(name: str, spawn: bool) -> None:
     rr.init(name, spawn=spawn)
 
 
+def _set_rerun_time(frame_index: int, timestamp: float) -> None:
+    if hasattr(rr, "set_time"):
+        rr.set_time("frame_index", sequence=frame_index)
+        rr.set_time("timestamp", timestamp=timestamp)
+        return
+    if hasattr(rr, "set_time_sequence"):
+        rr.set_time_sequence("frame_index", frame_index)
+    if hasattr(rr, "set_time_seconds"):
+        rr.set_time_seconds("timestamp", timestamp)
+
+
+def _rerun_scalar(value: float) -> Any:
+    if hasattr(rr, "Scalar"):
+        return rr.Scalar(value)
+    return rr.Scalars(value)
+
+
 def _log_rerun_scalars(
     frame_index: int,
     timestamp: float,
@@ -859,18 +890,17 @@ def _log_rerun_scalars(
     pred_vec: list[float] | None,
     target_vec: list[float] | None,
 ) -> None:
-    rr.set_time("frame_index", sequence=frame_index)
-    rr.set_time("timestamp", timestamp=timestamp)
-    rr.log("loss/l1", rr.Scalars(float(loss_l1) if loss_l1 is not None else np.nan))
-    rr.log("loss/l1_left", rr.Scalars(float(loss_l1_left) if loss_l1_left is not None else np.nan))
-    rr.log("loss/l1_right", rr.Scalars(float(loss_l1_right) if loss_l1_right is not None else np.nan))
-    rr.log("loss/ee", rr.Scalars(float(loss_ee) if loss_ee is not None else np.nan))
+    _set_rerun_time(frame_index, timestamp)
+    rr.log("loss/l1", _rerun_scalar(float(loss_l1) if loss_l1 is not None else np.nan))
+    rr.log("loss/l1_left", _rerun_scalar(float(loss_l1_left) if loss_l1_left is not None else np.nan))
+    rr.log("loss/l1_right", _rerun_scalar(float(loss_l1_right) if loss_l1_right is not None else np.nan))
+    rr.log("loss/ee", _rerun_scalar(float(loss_ee) if loss_ee is not None else np.nan))
     if pred_vec is not None:
         for i, v in enumerate(pred_vec):
-            rr.log(f"pred_action/{i}", rr.Scalars(float(v)))
+            rr.log(f"pred_action/{i}", _rerun_scalar(float(v)))
     if target_vec is not None:
         for i, v in enumerate(target_vec):
-            rr.log(f"target_action/{i}", rr.Scalars(float(v)))
+            rr.log(f"target_action/{i}", _rerun_scalar(float(v)))
 
 
 def _plot_loss_curves(path: Path, x: list[int], l1: list[float], l1_left: list[float], l1_right: list[float], ee: list[float]) -> None:
