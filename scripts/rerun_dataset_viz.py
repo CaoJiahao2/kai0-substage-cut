@@ -68,7 +68,7 @@ except Exception as exc:  # pragma: no cover - runtime dependency
 
 
 DEFAULT_DATASET = "data/Task_B/base"
-DEFAULT_URDF_ROOT = Path("/home/magiclab/projects/mobile_aloha_sim_ros2")
+DEFAULT_URDF_ROOT = Path("/home/magiclab/chenxuhua/Codes/mobile_aloha_sim_ros2")
 DEFAULT_URDF_PATH = DEFAULT_URDF_ROOT / "aloha_new_description/urdf/aloha_new.urdf"
 _SamplerBase = torch.utils.data.Sampler[int] if torch is not None else object
 
