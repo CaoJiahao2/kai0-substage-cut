@@ -156,6 +156,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--ee-links", default="fl_link8,fr_link8", help="left,right ee link names")
     parser.add_argument("--joint-unit", choices=["rad", "deg"], default="rad")
     parser.add_argument("--web-viewer-url", default=None, help="Push live frames to viewer server, e.g. http://127.0.0.1:9001")
+    parser.add_argument(
+        "--web-record-path",
+        type=Path,
+        default=None,
+        help="Record web viewer reset/push payloads to a local JSONL file for offline replay.",
+    )
     parser.add_argument("--web-push-every", type=int, default=1, help="Batch N frames before POST to /api/push")
     parser.add_argument("--web-log-images", action="store_true", help="Embed camera images into web viewer payloads.")
     parser.add_argument("--web-reset-first", action="store_true", help="POST /api/reset before starting live push.")
@@ -947,6 +953,16 @@ def _post_json(url: str, payload: dict[str, Any], timeout_s: float = 5.0) -> Non
             raise RuntimeError(f"Viewer POST failed with status {resp.status}")
 
 
+def _append_jsonl_event(path: Path, event_type: str, payload: dict[str, Any]) -> None:
+    record = {
+        "event": event_type,
+        "recorded_at": time.time(),
+        "payload": payload,
+    }
+    with path.open("a", encoding="utf-8") as fp:
+        fp.write(json.dumps(record, ensure_ascii=True) + "\n")
+
+
 def _safe_mean(values: list[float | None]) -> float | None:
     valid = [float(v) for v in values if v is not None]
     if not valid:
@@ -955,17 +971,21 @@ def _safe_mean(values: list[float | None]) -> float | None:
 
 
 def _push_viewer_payload(
-    viewer_url: str,
+    viewer_url: str | None = None,
     *,
+    record_path: Path | None = None,
     meta: dict[str, Any] | None = None,
     frames: list[dict[str, Any]] | None = None,
     trajectory_pred: dict[str, list[list[float]]] | None = None,
     trajectory_gt: dict[str, list[list[float]]] | None = None,
     reset_first: bool = False,
 ) -> None:
-    base = viewer_url.rstrip("/")
     if reset_first:
-        _post_json(f"{base}/api/reset", {})
+        if viewer_url is not None:
+            base = viewer_url.rstrip("/")
+            _post_json(f"{base}/api/reset", {})
+        if record_path is not None:
+            _append_jsonl_event(record_path, "reset", {})
     payload: dict[str, Any] = {}
     if meta:
         payload["meta"] = meta
@@ -978,7 +998,11 @@ def _push_viewer_payload(
     if not payload:
         return
     payload["timestamp"] = time.time()
-    _post_json(f"{base}/api/push", payload)
+    if viewer_url is not None:
+        base = viewer_url.rstrip("/")
+        _post_json(f"{base}/api/push", payload)
+    if record_path is not None:
+        _append_jsonl_event(record_path, "push", payload)
 
 
 def main() -> None:
@@ -1008,6 +1032,7 @@ def main() -> None:
 
     use_local_policy = args.local_policy_config is not None or args.local_policy_dir is not None
     viewer_url = args.web_viewer_url.rstrip("/") if args.web_viewer_url else None
+    viewer_record_path = args.web_record_path.expanduser().resolve() if args.web_record_path else None
     policy_source = None
     if use_local_policy:
         if not args.local_policy_config or args.local_policy_dir is None:
@@ -1052,22 +1077,38 @@ def main() -> None:
     if args.viz == "rerun":
         _init_rerun(args.rerun_name, spawn=not args.no_spawn_rerun)
 
-    if viewer_url is not None:
+    if viewer_record_path is not None:
+        viewer_record_path.parent.mkdir(parents=True, exist_ok=True)
+        if viewer_record_path.exists():
+            viewer_record_path.unlink()
+        _append_jsonl_event(
+            viewer_record_path,
+            "session_start",
+            {
+                "dataset_repo_id": dataset_repo_id,
+                "policy_source": policy_source,
+            },
+        )
+        logging.info("Viewer recording enabled: %s", viewer_record_path)
+
+    if viewer_url is not None or viewer_record_path is not None:
         viewer_meta = {
             "task_name": dataset_repo_id,
             "ckpt_path": policy_source,
             "num_frames": len(dataset),
             "action_index": args.target_action_index,
-            "mode": "live",
+            "mode": "live" if viewer_url is not None else "offline_recorded",
             "camera_keys": list(camera_map.keys()),
         }
         try:
             _push_viewer_payload(
                 viewer_url,
+                record_path=viewer_record_path,
                 meta=viewer_meta,
                 reset_first=args.web_reset_first,
             )
-            logging.info("Viewer push enabled: %s", viewer_url)
+            if viewer_url is not None:
+                logging.info("Viewer push enabled: %s", viewer_url)
         except (OSError, urllib_error.URLError, RuntimeError) as exc:
             raise RuntimeError(f"Failed to initialize viewer push to {viewer_url}: {exc}") from exc
 
@@ -1214,7 +1255,7 @@ def main() -> None:
             if csv_writer is not None:
                 csv_writer.writerow(row)
 
-            if viewer_url is not None:
+            if viewer_url is not None or viewer_record_path is not None:
                 ee_left, ee_right = _mean_errors_by_side(ee_error_by_link)
                 detail_payload: dict[str, Any] = {
                     "qpos": state_vec.astype(float).tolist(),
@@ -1254,6 +1295,7 @@ def main() -> None:
                 if len(viewer_frames_batch) >= max(1, args.web_push_every):
                     _push_viewer_payload(
                         viewer_url,
+                        record_path=viewer_record_path,
                         frames=viewer_frames_batch,
                         trajectory_pred=viewer_traj_pred,
                         trajectory_gt=viewer_traj_gt,
@@ -1292,10 +1334,11 @@ def main() -> None:
             )
             logging.info("Saved loss plot to %s", args.save_plot)
     finally:
-        if viewer_url is not None and viewer_frames_batch:
+        if (viewer_url is not None or viewer_record_path is not None) and viewer_frames_batch:
             try:
                 _push_viewer_payload(
                     viewer_url,
+                    record_path=viewer_record_path,
                     frames=viewer_frames_batch,
                     trajectory_pred=viewer_traj_pred,
                     trajectory_gt=viewer_traj_gt,

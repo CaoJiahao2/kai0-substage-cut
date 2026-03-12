@@ -31,6 +31,7 @@ import openpi.transforms as _transforms
 
 import openpi.policies.agilex_policy as agilex_policy
 import openpi.policies.arx_policy as arx_policy
+import openpi.policies.magicg1_policy as magicg1_policy
 
 ModelType: TypeAlias = _model.ModelType
 # Work around a tyro issue with using nnx.filterlib.Filter directly.
@@ -542,6 +543,85 @@ class LerobotARXDataConfig(DataConfigFactory):
             )
 
         # Create model transforms
+        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transforms,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            action_sequence_keys=self.action_sequence_keys,
+            episodes=self.episodes,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LerobotMagicG1DataConfig(DataConfigFactory):
+    """
+    Configuration for the MagicG1 robot dataset.
+    This config follows the Agilex/ARX LeRobot layout but returns the first 30 action dimensions.
+    """
+
+    use_delta_joint_actions: bool = True
+    default_prompt: str | None = None
+    insert_advantage_into_prompt: bool = False
+    episodes: list[int] | None = None
+
+    repack_transforms: tyro.conf.Suppress[_transforms.Group] = dataclasses.field(
+        default=_transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "images": {
+                            "top_head": "observation.images.top_head",
+                            "hand_left": "observation.images.hand_left",
+                            "hand_right": "observation.images.hand_right",
+                        },
+                        "state": "observation.state",
+                        "actions": "action",
+                    }
+                )
+            ]
+        )
+    )
+
+    action_sequence_keys: Sequence[str] = ("action",)
+    mask_state: bool = False
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        default_prompt = self.default_prompt
+        repack_transforms = self.repack_transforms
+
+        if self.base_config and self.base_config.prompt_from_task:
+            default_prompt = None
+            original_repack = self.repack_transforms.inputs[0]
+            new_structure = dict(original_repack.structure)
+            new_structure["prompt"] = "prompt"
+            repack_transforms = _transforms.Group(
+                inputs=[_transforms.RepackTransform(new_structure)]
+            )
+
+        data_transforms = _transforms.Group(
+            inputs=[
+                magicg1_policy.MagicG1Inputs(
+                    action_dim=model_config.action_dim,
+                    model_type=model_config.model_type,
+                    mask_state=self.mask_state,
+                )
+            ],
+            outputs=[magicg1_policy.MagicG1Outputs()],
+        )
+        if self.insert_advantage_into_prompt:
+            data_transforms.inputs.insert(0, _transforms.InsertAdvantageIntoPrompt())
+
+        if self.use_delta_joint_actions:
+            delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
         model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
 
         return dataclasses.replace(
