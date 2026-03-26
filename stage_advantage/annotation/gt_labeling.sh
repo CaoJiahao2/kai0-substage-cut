@@ -8,7 +8,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ─── Source dataset path (modify this to your dataset) ────────────────────────
-DATA_PATH="Path/to/your/dataset"
+DATA_PATH="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_A/base_clean"
 
 # ─── Output base directory ────────────────────────────────────────────────────
 base_name=$(basename "$DATA_PATH")

@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -348,8 +349,93 @@ def process_episodes_stats_jsonl(
 
 # ==================== Video Processing ====================
 
+def _run_ffmpeg_flip(input_path: str, output_path: str, codec: str, extra_args: List[str]) -> Tuple[str, bool, str]:
+    """Run ffmpeg horizontal flip with a specific codec."""
+    try:
+        os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            input_path,
+            "-vf",
+            "hflip",
+            "-an",
+            "-c:v",
+            codec,
+            *extra_args,
+            output_path,
+        ]
+        completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if completed.returncode != 0:
+            message = completed.stderr.strip() or completed.stdout.strip() or "ffmpeg failed"
+            return (input_path, False, message)
+        return (input_path, True, f"Successfully flipped with ffmpeg ({codec})")
+    except FileNotFoundError:
+        return (input_path, False, "ffmpeg not found")
+    except Exception as e:
+        return (input_path, False, f"ffmpeg error: {str(e)}")
+
+
+def _flip_video_ffmpeg(input_path: str, output_path: str) -> Tuple[str, bool, str]:
+    """Flip a video with ffmpeg hflip filter, preferring NVENC on NVIDIA GPUs."""
+    attempts = [
+        (
+            "h264_nvenc",
+            [
+                "-preset",
+                "p1",
+                "-tune",
+                "ll",
+                "-pix_fmt",
+                "yuv420p",
+                "-cq",
+                "28",
+                "-rc",
+                "vbr",
+            ],
+        ),
+        (
+            "libx264",
+            [
+                "-preset",
+                "ultrafast",
+                "-pix_fmt",
+                "yuv420p",
+                "-threads",
+                "1",
+            ],
+        ),
+    ]
+
+    errors = []
+    for codec, extra_args in attempts:
+        result = _run_ffmpeg_flip(input_path, output_path, codec, extra_args)
+        if result[1]:
+            return result
+        errors.append(f"{codec}: {result[2]}")
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
+
+    if any("ffmpeg not found" in err for err in errors):
+        return (input_path, False, "ffmpeg not found")
+    return (input_path, False, "; ".join(errors))
+
+
 def flip_video(input_path: str, output_path: str) -> Tuple[str, bool, str]:
     """Flip a single video file (horizontal mirroring)"""
+    ffmpeg_result = _flip_video_ffmpeg(input_path, output_path)
+    if ffmpeg_result[1]:
+        return ffmpeg_result
+    if "ffmpeg not found" not in ffmpeg_result[2]:
+        return (input_path, False, f"ffmpeg failed: {ffmpeg_result[2]}")
+
     try:
         cap = cv2.VideoCapture(input_path)
         if not cap.isOpened():
@@ -382,7 +468,7 @@ def flip_video(input_path: str, output_path: str) -> Tuple[str, bool, str]:
         cap.release()
         out.release()
         
-        return (input_path, True, f"Successfully processed {frame_count} frames")
+        return (input_path, True, f"Successfully processed {frame_count} frames with OpenCV fallback")
     
     except Exception as e:
         return (input_path, False, f"Error: {str(e)}")
@@ -712,4 +798,3 @@ Examples:
 
 if __name__ == '__main__':
     main()
-

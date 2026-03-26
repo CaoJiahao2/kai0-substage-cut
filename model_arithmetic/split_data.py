@@ -1,15 +1,17 @@
 """
-Split a LeRobot-format dataset into multiple disjoint subsets by episode.
+Split a LeRobot-format dataset by episode.
 
-Each subset is written as a full LeRobot dataset under dst_path/split_0, split_1, ...
-Episodes are shuffled (with a fixed seed) then divided so you can train separate
-models on each subset and later mix them with model_arithmetic/arithmetic.py.
+Supports two modes:
+1. Multi-split mode: write disjoint subsets under dst_path/split_0, split_1, ...
+2. Train/val mode: write a small validation split under dst_path/val and the
+   remaining episodes under dst_path/train.
 """
 from pathlib import Path
 import json
 import argparse
 import shutil
 import random
+import math
 import pandas as pd
 import numpy as np
 import os
@@ -153,7 +155,10 @@ def split_lerobot_data(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Split a LeRobot dataset into disjoint subsets by episode for training separate models."
+        description=(
+            "Split a LeRobot dataset by episode. Default mode writes split_0, split_1, ...; "
+            "train/val mode is enabled by --val_ratio or --val_episodes."
+        )
     )
     parser.add_argument(
         "--source_path",
@@ -165,13 +170,33 @@ def main() -> None:
         "--dst_path",
         type=str,
         required=True,
-        help="Output directory; subsets will be written as dst_path/split_0, split_1, ...",
+        help=(
+            "Output directory. Multi-split mode writes split_0, split_1, ...; "
+            "train/val mode writes train/ and val/."
+        ),
     )
     parser.add_argument(
         "--split_num",
         type=int,
         default=4,
-        help="Number of disjoint subsets to create (default: 4).",
+        help="Number of disjoint subsets to create in multi-split mode (default: 4).",
+    )
+    parser.add_argument(
+        "--val_ratio",
+        type=float,
+        default=None,
+        help=(
+            "Enable train/val mode and reserve this fraction of episodes for validation. "
+            "Example: 0.1 means 10%% of episodes go to val."
+        ),
+    )
+    parser.add_argument(
+        "--val_episodes",
+        type=int,
+        default=None,
+        help=(
+            "Enable train/val mode and reserve this many episodes for validation."
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -188,8 +213,40 @@ def main() -> None:
         info = json.load(f)
     total_episodes = info["total_episodes"]
     episode_indices = list(range(total_episodes))
+
+    if args.val_ratio is not None and args.val_episodes is not None:
+        raise ValueError("Use only one of --val_ratio or --val_episodes")
+    if args.val_ratio is not None and not (0.0 < args.val_ratio < 1.0):
+        raise ValueError("--val_ratio must be between 0 and 1")
+    if args.val_episodes is not None and args.val_episodes <= 0:
+        raise ValueError("--val_episodes must be positive")
+    if args.split_num <= 0:
+        raise ValueError("--split_num must be positive")
+
     random.seed(args.seed)
     random.shuffle(episode_indices)
+
+    if args.val_ratio is not None or args.val_episodes is not None:
+        if args.val_episodes is not None:
+            val_count = args.val_episodes
+        else:
+            val_count = math.ceil(total_episodes * args.val_ratio)
+
+        if val_count <= 0 or val_count >= total_episodes:
+            raise ValueError(
+                f"Validation split must contain at least 1 and fewer than all episodes; got {val_count} out of {total_episodes}"
+            )
+
+        val_indices = sorted(episode_indices[:val_count])
+        train_indices = sorted(episode_indices[val_count:])
+
+        print(
+            f"Train/val mode: total={total_episodes}, train={len(train_indices)}, val={len(val_indices)}"
+        )
+        split_lerobot_data(source_path, dst_path / "train", train_indices, 0)
+        split_lerobot_data(source_path, dst_path / "val", val_indices, 1)
+        return
+
     splits = np.array_split(episode_indices, args.split_num)
     max_workers = min(args.split_num, os.cpu_count() or 1)
     with mp.Pool(processes=max_workers) as pool:

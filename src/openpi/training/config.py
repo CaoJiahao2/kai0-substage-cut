@@ -31,6 +31,7 @@ import openpi.transforms as _transforms
 
 import openpi.policies.agilex_policy as agilex_policy
 import openpi.policies.arx_policy as arx_policy
+import openpi.policies.magicg1_policy as magicg1_policy
 
 ModelType: TypeAlias = _model.ModelType
 # Work around a tyro issue with using nnx.filterlib.Filter directly.
@@ -542,6 +543,85 @@ class LerobotARXDataConfig(DataConfigFactory):
             )
 
         # Create model transforms
+        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transforms,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            action_sequence_keys=self.action_sequence_keys,
+            episodes=self.episodes,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LerobotMagicG1DataConfig(DataConfigFactory):
+    """
+    Configuration for the MagicG1 robot dataset.
+    This config follows the Agilex/ARX LeRobot layout but returns the first 30 action dimensions.
+    """
+
+    use_delta_joint_actions: bool = True
+    default_prompt: str | None = None
+    insert_advantage_into_prompt: bool = False
+    episodes: list[int] | None = None
+
+    repack_transforms: tyro.conf.Suppress[_transforms.Group] = dataclasses.field(
+        default=_transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "images": {
+                            "top_head": "observation.images.top_head",
+                            "hand_left": "observation.images.hand_left",
+                            "hand_right": "observation.images.hand_right",
+                        },
+                        "state": "observation.state",
+                        "actions": "action",
+                    }
+                )
+            ]
+        )
+    )
+
+    action_sequence_keys: Sequence[str] = ("action",)
+    mask_state: bool = False
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        default_prompt = self.default_prompt
+        repack_transforms = self.repack_transforms
+
+        if self.base_config and self.base_config.prompt_from_task:
+            default_prompt = None
+            original_repack = self.repack_transforms.inputs[0]
+            new_structure = dict(original_repack.structure)
+            new_structure["prompt"] = "prompt"
+            repack_transforms = _transforms.Group(
+                inputs=[_transforms.RepackTransform(new_structure)]
+            )
+
+        data_transforms = _transforms.Group(
+            inputs=[
+                magicg1_policy.MagicG1Inputs(
+                    action_dim=model_config.action_dim,
+                    model_type=model_config.model_type,
+                    mask_state=self.mask_state,
+                )
+            ],
+            outputs=[magicg1_policy.MagicG1Outputs()],
+        )
+        if self.insert_advantage_into_prompt:
+            data_transforms.inputs.insert(0, _transforms.InsertAdvantageIntoPrompt())
+
+        if self.use_delta_joint_actions:
+            delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
         model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
 
         return dataclasses.replace(
@@ -1201,11 +1281,250 @@ _CONFIGS = [
         model=pi0_config.Pi0Config(pi05=True),
         data = LerobotAgilexDataConfig(
             repo_id="OpenDriveLab-org/Kai0",
-            root="/home/ubuntu/Data/Kai0_newdataset/Task_A/base",
+            root="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_A/base_clean_split1",
             default_prompt="Flatten and fold the cloth.",
             use_delta_joint_actions=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/home/ubuntu/Codes/kai0/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=30_000,
+        keep_period=4000,
+        num_workers=32,
+        batch_size=128,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_split2",
+        model=pi0_config.Pi0Config(pi05=True),
+        data = LerobotAgilexDataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_A/base_clean_split2",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=30_000,
+        keep_period=4000,
+        num_workers=32,
+        batch_size=128,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_split3",
+        model=pi0_config.Pi0Config(pi05=True),
+        data = LerobotAgilexDataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_A/base_clean_split3_trainval/train",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=30_000,
+        keep_period=4000,
+        num_workers=32,
+        batch_size=128,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_4_splits_index_0",
+        model=pi0_config.Pi0Config(pi05=True),
+        data = LerobotAgilexDataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_A/base_splits/split_0",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=5_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=20_000,
+        keep_period=4000,
+        num_workers=128,
+        batch_size=128,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_4_splits_index_1",
+        model=pi0_config.Pi0Config(pi05=True),
+        data = LerobotAgilexDataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_A/base_splits/split_1",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=5_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=20_000,
+        keep_period=4000,
+        num_workers=128,
+        batch_size=128,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_4_splits_index_2",
+        model=pi0_config.Pi0Config(pi05=True),
+        data = LerobotAgilexDataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_A/base_splits/split_2",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=5_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=20_000,
+        keep_period=4000,
+        num_workers=128,
+        batch_size=128,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_4_splits_index_3",
+        model=pi0_config.Pi0Config(pi05=True),
+        data = LerobotAgilexDataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_A/base_splits/split_3",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=5_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=20_000,
+        keep_period=4000,
+        num_workers=128,
+        batch_size=128,
+    ),
+
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_space_mirror",
+        model=pi0_config.Pi0Config(pi05=True),
+        data = LerobotAgilexDataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_A/base_clean_mirror_merge",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/magicflow/chenxuhua/Models/magiclab_works/kai0/pi05_flatten_fold_normal_follow_paper_space_mirror/flatten_fold_space_mirror_full_finetune_bs128_0313/79999/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=80_000,
+        keep_period=20000,
+        num_workers=64,
+        batch_size=128,
+    ),
+
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_dagger",
+        model=pi0_config.Pi0Config(pi05=True),
+        data = LerobotAgilexDataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_A/dagger",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/magicflow/chenxuhua/Models/magiclab_works/kai0/pi05_flatten_fold_normal_follow_paper/flatten_fold_full_finetune_bs128_0304/79999/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=80_000,
+        keep_period=4000,
+        num_workers=64,
+        batch_size=128,
+    ),
+    
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_base_dagger_merge",
+        model=pi0_config.Pi0Config(pi05=True),
+        data = LerobotAgilexDataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_A/base_dagger_merge",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=80_000,
+        keep_period=4000,
+        num_workers=64,
+        batch_size=128,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_base_dagger_merge_105K",
+        model=pi0_config.Pi0Config(pi05=True),
+        data = LerobotAgilexDataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_A/base_dagger_merge",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=13_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=105_000,
+        keep_period=4000,
+        num_workers=64,
+        batch_size=128,
+    ),
+    
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_magiclab",
+        model=pi0_config.Pi0Config(pi05=True),
+        data = LerobotMagicG1DataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/magicflow/chenxuhua/Data/fold_clothes_20260129_v21",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "top_head": "observation.images.headf_rgbd_color",
+                                "hand_left": "observation.images.hand_l_rgb",
+                                "hand_right": "observation.images.hand_r_rgb",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
         lr_schedule=_optimizer.CosineDecaySchedule(
             peak_lr=2.5e-5,
             decay_steps=10_000,
@@ -1216,6 +1535,7 @@ _CONFIGS = [
         num_workers=32,
         batch_size=128,
     ),
+    
     TrainConfig(
         name="pi05_flatten_fold_normal_follow_paper_lora",
         model=pi0_config.Pi0Config(
@@ -1225,7 +1545,7 @@ _CONFIGS = [
         ),
         data = LerobotAgilexDataConfig(
             repo_id="OpenDriveLab-org/Kai0",
-            root="/home/ubuntu/Data/Kai0_newdataset/Task_A/base",
+            root="/magicflow/chenxuhua/Data/fold_clothes_20260129_v21",
             default_prompt="Flatten and fold the cloth.",
             use_delta_joint_actions=False,
         ),
@@ -1246,19 +1566,98 @@ _CONFIGS = [
         ).get_freeze_filter(),
         ema_decay=None,
     ),
+    
+    TrainConfig(
+        name="pi05_flatten_fold_normal_follow_paper_lora_magiclab",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data = LerobotMagicG1DataConfig(
+            repo_id="OpenDriveLab-org/Kai0",
+            root="/magicflow/chenxuhua/Data/fold_clothes_20260129_v21",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "top_head": "observation.images.headf_rgbd_color",
+                                "hand_left": "observation.images.hand_l_rgb",
+                                "hand_right": "observation.images.hand_r_rgb",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=80_000,
+        keep_period=5000,
+        num_workers=16,
+        batch_size=16,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+    ),
     TrainConfig(
         name="pi05_tee_shirt_sort_normal",
         model=pi0_config.Pi0Config(pi05=True),
         data = LerobotAgilexDataConfig(
-            repo_id="<path_to_repo_root>/data/TeeShirtSort/base",
+            repo_id="/magicflow/chenxuhua/Data/Kai0_newdataset/Task_B/base",
             default_prompt="Fetch the clothes, fold the tee shirts and hand-over the collared shirts.",
             use_delta_joint_actions=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("<path/to/pi05_base/checkpoint>"),
-        num_train_steps=100_000,
-        keep_period=5000,
-        num_workers=8,
-        batch_size=256,
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=80_000,
+        keep_period=4000,
+        num_workers=64,
+        batch_size=128,
+    ),
+    TrainConfig(
+        name="pi05_tee_shirt_sort_normal_lora",
+        model=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            pi05=True),
+        data = LerobotAgilexDataConfig(
+            repo_id="/home/chenxuhua/Data/Kai0_newdataset/Task_B/base",
+            default_prompt="Fetch the clothes, fold the tee shirts and hand-over the collared shirts.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/chenxuhua/Codes/kai0/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=80_000,
+        keep_period=4000,
+        num_workers=64,
+        batch_size=128,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
     ),
     TrainConfig(
         name="pi05_hang_cloth_normal",

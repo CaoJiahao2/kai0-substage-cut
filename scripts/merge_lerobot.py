@@ -23,8 +23,8 @@ import numpy as np
 
 # --- lerobot imports (must be available in env) ---
 try:
-    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-    from lerobot.common.datasets.utils import (
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+    from lerobot.datasets.utils import (
         load_info,
         load_episodes,
         load_episodes_stats,

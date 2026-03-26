@@ -78,6 +78,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable jit for sample_actions (useful for debugging).",
     )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=2,
+    )
     return parser.parse_args()
 
 
@@ -89,7 +99,8 @@ def main() -> None:
         cfg = dataclasses.replace(cfg, data=dataclasses.replace(cfg.data, repo_id=args.repo_id))
 
     ckpt_dir = _resolve_jax_checkpoint(args.checkpoint, cfg)
-
+    import pdb;pdb.set_trace()
+    cfg = dataclasses.replace(cfg, batch_size=args.batch_size,num_workers=args.num_workers)
     params = _model.restore_params(ckpt_dir / "params", dtype=jnp.bfloat16)
     model = cfg.model.load(params)
     model.eval()
@@ -125,8 +136,9 @@ def main() -> None:
             num_steps=args.num_denoise_steps,
         )
         pred_actions = jnp.asarray(pred_actions, dtype=jnp.float32)
-        #import ipdb;ipdb.set_trace()
+        import ipdb;ipdb.set_trace()
         abs_err = jnp.abs(pred_actions - actions)
+        
         total_abs_err += float(jax.device_get(abs_err.sum()))
         total_elems += int(abs_err.size)
 

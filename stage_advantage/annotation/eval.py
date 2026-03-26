@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import List, Dict
 import pyarrow as pa
 from tqdm import tqdm
-import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
+import lerobot.datasets.lerobot_dataset as lerobot_dataset
 
 # Model configuration registry: maps (model_type, model_name) to checkpoint info.
 # Only two variants: PI06 (single-timestep) and KAI0 (two-timestep stage-level).

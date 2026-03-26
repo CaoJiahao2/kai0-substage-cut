@@ -46,7 +46,7 @@ ml-dtypes==0.4.1
 tensorstore==0.1.74
 
 # uv source pin
-git+https://github.com/huggingface/lerobot.git@0cf864870cf29f4738d3ade893e6fd13fbd7cdb5
+lerobot==0.3.3
 
 # Workspace member used by openpi
 -e ./packages/openpi-client

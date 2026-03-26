@@ -1,5 +1,5 @@
-conda create -n kai0 python=3.11 -y
-conda activate kai0
+conda create -p /magicflow/xuhuachen/conda/envs/kai0 python=3.11 -y
+conda activate /magicflow/xuhuachen/conda/envs/kai0
 
 # 建议先升级 pip
 python -m pip install -U pip
