@@ -26,13 +26,13 @@ Inference is split across two machines:
 **On the GPU host**, from the repo root:
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config=<train_config_name> --policy.dir=<checkpoint_dir> [--port=8000]
+uv run scripts/infer/serve_policy.py policy:checkpoint --policy.config=<train_config_name> --policy.dir=<checkpoint_dir> [--port=8000]
 ```
 
 Example (use the same config name and checkpoint path you used for training):
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_libero --policy.dir=checkpoints/pi05_libero/my_experiment/20000
+uv run scripts/infer/serve_policy.py policy:checkpoint --policy.config=pi05_libero --policy.dir=checkpoints/pi05_libero/my_experiment/20000
 ```
 
 Default port is `8000`. The server binds to `0.0.0.0` so the industrial PC can connect.

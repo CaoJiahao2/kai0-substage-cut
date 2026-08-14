@@ -33,7 +33,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -68,11 +68,11 @@ _ensure_lerobot_stub()
 from openpi.policies import policy_config as _policy_config
 from openpi.shared import normalize as _normalize
 from openpi.training import config as _config
-from scripts import infer_dataset_loss_viz as _infer_helpers
-from scripts.rerun_dataset_viz import URDFKinematics
-from scripts.rerun_dataset_viz import _build_urdf_to_dataset_map
-from scripts.rerun_dataset_viz import _joint_map_from_state
-from scripts.rerun_dataset_viz import _rewrite_urdf_for_fk
+from scripts.viz import infer_dataset_loss_viz as _infer_helpers
+from scripts.viz.rerun_dataset_viz import URDFKinematics
+from scripts.viz.rerun_dataset_viz import _build_urdf_to_dataset_map
+from scripts.viz.rerun_dataset_viz import _joint_map_from_state
+from scripts.viz.rerun_dataset_viz import _rewrite_urdf_for_fk
 
 
 DEFAULT_CAMERA_KEYS = (

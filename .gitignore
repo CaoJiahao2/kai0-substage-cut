@@ -208,8 +208,31 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-% macOS
+# macOS
 .DS_Store
 wandb
 assets
 *.pkl
+
+# folder
+checkpoint/
+ckpt_local/
+data/
+
+# kai0: large checkpoints / generated artifacts / experiment outputs
+value_model/
+value_model_version2/
+outputs/
+experiment/
+logs/
+models/
+run_*
+archive/
+data_infer/
+# kai0: root-level symlinks to external data mounts (ignored as files/symlinks too)
+/data
+/data_infer
+*.pid
+
+# kai0: one-off / scratch (kept only in archive/)
+.venv-bak/

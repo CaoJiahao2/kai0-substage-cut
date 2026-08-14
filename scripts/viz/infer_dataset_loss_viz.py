@@ -28,7 +28,7 @@ from urllib import request as urllib_request
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -822,7 +822,7 @@ def _vector_to_fk_point(
         return fk[:3, 3].tolist()
 
     if isinstance(solver, tuple) and len(solver) == 2:
-        from scripts.rerun_dataset_viz import _joint_map_from_state as _joint_map_from_state_rerun
+        from scripts.viz.rerun_dataset_viz import _joint_map_from_state as _joint_map_from_state_rerun
 
         kin, link_name = solver
         joint_map = _joint_map_from_state_rerun(
@@ -871,7 +871,7 @@ def _init_fk(
             solvers[link_name] = solver
             maps[link_name] = mapping
     else:
-        from scripts.rerun_dataset_viz import URDFKinematics
+        from scripts.viz.rerun_dataset_viz import URDFKinematics
 
         logging.warning("RobotKinematics unavailable, falling back to URDFKinematics.")
         kin = URDFKinematics(fk_urdf)

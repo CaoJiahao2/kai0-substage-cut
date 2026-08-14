@@ -77,7 +77,7 @@ Inference uses two machines: a **GPU host** (policy server) and the **client mac
 From the **repository root** on the GPU machine:
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config=<train_config> --policy.dir=<checkpoint_dir> [--port=8000]
+uv run scripts/infer/serve_policy.py policy:checkpoint --policy.config=<train_config> --policy.dir=<checkpoint_dir> [--port=8000]
 ```
 
 Use the same training config and checkpoint as your trained model. For **RTC inference**, use an RTC config (e.g. `pi0_rtc_aloha_sim` or `pi05_rtc_flatten_fold_inference`); see [RTC mode](#rtc-real-time-chunking-mode) below.
@@ -129,7 +129,7 @@ Before running inference (or DAGGER), **CAN must be configured and up** (per the
 **RTC** stands for **real-time chunking** [\[1\]](#references). For RTC inference, the policy server must load the **RTC model** (Pi0RTC). Start the server with an RTC config, e.g.:
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi0_rtc_aloha_sim --policy.dir=<path_to_jax_checkpoint> [--port=8000]
+uv run scripts/infer/serve_policy.py policy:checkpoint --policy.config=pi0_rtc_aloha_sim --policy.dir=<path_to_jax_checkpoint> [--port=8000]
 ```
 
 Then run the ARX inference script with **`--rtc_mode`** (e.g. `arx_openpi_inference_rtc.py --rtc_mode`). RTC uses JAX checkpoints only.

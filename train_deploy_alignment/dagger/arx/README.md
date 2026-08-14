@@ -52,7 +52,7 @@ Same idea as inference: start the policy server on the GPU machine, then on the 
 From the **repository root**:
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config=<config> --policy.dir=<checkpoint_dir> [--port=8000]
+uv run scripts/infer/serve_policy.py policy:checkpoint --policy.config=<config> --policy.dir=<checkpoint_dir> [--port=8000]
 ```
 
 Note the server IP for use on the IPC (e.g. `<policy_server_ip>`).

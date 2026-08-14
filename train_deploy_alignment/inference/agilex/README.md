@@ -70,13 +70,13 @@ Inference uses two machines: a **GPU host** (e.g. 4090) that runs the policy ser
 From the **repository root** on the GPU machine:
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config=<train_config> --policy.dir=<checkpoint_dir> [--port=8000]
+uv run scripts/infer/serve_policy.py policy:checkpoint --policy.config=<train_config> --policy.dir=<checkpoint_dir> [--port=8000]
 ```
 
 Use the **same training config name and checkpoint directory** as your trained model. Example:
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_libero --policy.dir=checkpoints/pi05_libero/my_experiment/20000
+uv run scripts/infer/serve_policy.py policy:checkpoint --policy.config=pi05_libero --policy.dir=checkpoints/pi05_libero/my_experiment/20000
 ```
 
 Default port is `8000`. The server listens on all interfaces (`0.0.0.0`) so the IPC can connect. Note the GPU host’s **IP address** (e.g. `192.168.1.10`) for the next step.
@@ -86,7 +86,7 @@ Default port is `8000`. The server listens on all interfaces (`0.0.0.0`) so the 
 **RTC** stands for **real-time chunking** [\[1\]](#references) and enables aligning newly inferred action chunks with the previously executed prefix under latency. For **RTC inference** (`inference/agilex_inference_openpi_rtc.py` with `--rtc_mode`), the policy server must load the **RTC model** (Pi0RTC), which supports `prev_action_chunk`, `inference_delay`, and `execute_horizon` for real-time guidance. Use an **RTC training config** when starting the server:
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_rtc_flatten_fold_inference --policy.dir=<path_to_jax_checkpoint> [--port=8000]
+uv run scripts/infer/serve_policy.py policy:checkpoint --policy.config=pi05_rtc_flatten_fold_inference --policy.dir=<path_to_jax_checkpoint> [--port=8000]
 ```
 
 - **Config name:** Use an RTC config: **Pi0-based** e.g. `pi05_rtc_flatten_fold_inference` (`model=pi0_config.Pi0RTCConfig()`), or **Pi05-based** e.g. `pi05_rtc_flatten_fold_inference` (`model=pi0_config.Pi0RTCConfig(pi05=True)`). Same checkpoint weights as the non-RTC model can be used; the RTC config only changes the model class (Pi0RTC) used at serve time.

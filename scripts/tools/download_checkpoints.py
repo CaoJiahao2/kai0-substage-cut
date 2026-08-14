@@ -3,10 +3,10 @@
 Download Kai0 best-model checkpoints from Hugging Face to the repo's ./checkpoints directory.
 
 Run from the repository root:
-    python scripts/download_checkpoints.py
+    python scripts/tools/download_checkpoints.py
 
 Optional: download only specific tasks or set a custom output path:
-    python scripts/download_checkpoints.py --tasks FlattenFold HangCloth --local-dir ./my_ckpts
+    python scripts/tools/download_checkpoints.py --tasks FlattenFold HangCloth --local-dir ./my_ckpts
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from pathlib import Path
 
 def get_repo_root() -> Path:
     """Return the repository root (directory containing .git)."""
-    path = Path(__file__).resolve().parent.parent
+    path = Path(__file__).resolve().parent.parent.parent
     if (path / ".git").exists():
         return path
     # Fallback: assume cwd is repo root

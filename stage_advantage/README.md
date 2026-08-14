@@ -15,7 +15,7 @@ This module implements a pipeline for training an **Advantage Estimator** and us
  │  Step 2: Predict Advantage (annotation/eval.py)                          │
  │  Use trained estimator → parquets with absolute_advantage / relative_adv │
  ├──────────────────────────────────────────────────────────────────────────┤
- │  Step 3: Discretize Advantage (annotation/discretize_advantage.py)       │
+ │  Step 3: Discretize Advantage (annotation/gt_label.py)       │
  │  Bin advantages into positive/negative → task_index + tasks.jsonl        │
  ├──────────────────────────────────────────────────────────────────────────┤
  │  Step 4: AWBC Training (scripts/train.py pi05_*_awbc)                    │
@@ -25,7 +25,7 @@ This module implements a pipeline for training an **Advantage Estimator** and us
 
 **End-to-end order for AWBC:** Step 0 → Step 1 → Step 2 → Step 3 → Step 4.
 
-**Pre-annotated data:** The released dataset includes **`Task_A/advantage/`**, a fully annotated advantage dataset that can be used **directly for AWBC training** (Step 4) without running Step 0–3. It is available in both the [Hugging Face](https://huggingface.co/datasets/OpenDriveLab-org/Kai0) and [ModelScope](https://www.modelscope.cn/datasets/OpenDriveLab/Kai0) dataset repos. After downloading (e.g. via `scripts/download_dataset.py`), set the AWBC config `repo_id` to the local path (e.g. `<repo_root>/data/Task_A/advantage`) and run training.
+**Pre-annotated data:** The released dataset includes **`FlattenFold/advantage/`** (and the sibling `TeeShirtSort/advantage/`, `HangCloth/advantage/`), fully annotated advantage datasets that can be used **directly for AWBC training** (Step 4) without running Step 0–3. It is available in both the [Hugging Face](https://huggingface.co/datasets/OpenDriveLab-org/Kai0) and [ModelScope](https://www.modelscope.cn/datasets/OpenDriveLab/Kai0) dataset repos. After downloading (e.g. via `scripts/tools/download_dataset.py`), set the AWBC config `repo_id` to the local path (e.g. `<repo_root>/data/FlattenFold/advantage`) and run training.
 
 ---
 
@@ -200,7 +200,7 @@ Results are saved alongside the original data directory:
 
 **Goal**: Take the predicted advantages from Step 2 (`absolute_advantage` or `relative_advantage`) and discretize them into binary (positive / negative) or n-slice `task_index` labels. This produces the dataset format needed for AWBC (Step 4): each frame gets a `task_index`, and `meta/tasks.jsonl` maps each `task_index` to a prompt string.
 
-**Script**: `annotation/discretize_advantage.py` (batch wrapper: `annotation/discretize_advantage.sh`)
+**Script**: `annotation/gt_label.py` (batch wrapper: `annotation/gt_labeling.sh`)
 
 ### How it works
 
@@ -218,14 +218,14 @@ Results are saved alongside the original data directory:
 cd stage_advantage/annotation
 
 # Binary labeling using absolute_advantage
-python discretize_advantage.py <dataset_path> \
+python gt_label.py <dataset_path> \
     --threshold 30 \
     --chunk-size 50 \
     --discretion-type binary \
     --advantage-source absolute_advantage
 
 # 2-stage binary labeling
-python discretize_advantage.py <dataset_path> \
+python gt_label.py <dataset_path> \
     --threshold 30 \
     --chunk-size 50 \
     --discretion-type binary \
@@ -233,14 +233,14 @@ python discretize_advantage.py <dataset_path> \
     --stage-nums 2
 
 # Dry run (only print statistics, do not modify files)
-python discretize_advantage.py <dataset_path> --dry-run
+python gt_label.py <dataset_path> --dry-run
 ```
 
-For batch labeling across PI06 and KAI0 variants, see `discretize_advantage.sh`:
+For batch labeling across PI06 and KAI0 variants, see `gt_labeling.sh`:
 
 ```bash
-# Edit DATA_PATH in discretize_advantage.sh first (point to your Step 2 output repo)
-bash stage_advantage/annotation/discretize_advantage.sh
+# Edit DATA_PATH in gt_labeling.sh first (point to your Step 2 output repo)
+bash stage_advantage/annotation/gt_labeling.sh
 ```
 
 ### Key Parameters
@@ -261,13 +261,13 @@ bash stage_advantage/annotation/discretize_advantage.sh
 
 **Goal**: Train a policy using **Advantage-Weighted Behavior Cloning (AWBC)**. The advantage labels (from Step 3) are stored as `task_index` per frame and as prompt strings in `meta/tasks.jsonl`. By setting **`prompt_from_task=True`** in the data config, each sample's prompt is taken from that mapping, so the policy is conditioned on the advantage-derived label (e.g. high vs low advantage) and effectively does advantage-weighted behavior cloning via the language channel.
 
-**Configs** (in `src/openpi/training/config.py`): `pi05_flatten_fold_awbc`, `pi05_tee_shirt_sort_awbc`, `pi05_hang_cloth_awbc`. Each uses `LerobotAgilexDataConfig` or `LerobotARXDataConfig` with `base_config=DataConfig(prompt_from_task=True)` and `repo_id` pointing to the **advantage** dataset (e.g. `.../data/Task_A/advantage`).
+**Configs** (in `src/openpi/training/config.py`): `pi05_flatten_fold_awbc`, `pi05_tee_shirt_sort_awbc`, `pi05_hang_cloth_awbc`. Each uses `LerobotAgilexDataConfig` or `LerobotARXDataConfig` with `base_config=DataConfig(prompt_from_task=True)` and `repo_id` pointing to the **advantage** dataset (e.g. `.../data/FlattenFold/advantage`).
 
 ### What the policy sees as prompt (training)
 
-The prompt is read from the dataset's **`meta/tasks.jsonl`**: each frame's `task_index` is mapped to a task string, and that string is passed to the policy as the language prompt. **`discretize_advantage.py`** (Step 3) writes these strings when it builds the advantage-labeled dataset.
+The prompt is read from the dataset's **`meta/tasks.jsonl`**: each frame's `task_index` is mapped to a task string, and that string is passed to the policy as the language prompt. **`gt_label.py`** (Step 3) writes these strings when it builds the advantage-labeled dataset.
 
-- **Binary mode** (typical): `task_index=0` → `"<task>, Advantage: negative"`, `task_index=1` → `"<task>, Advantage: positive"` (e.g. `"fold the cloth, Advantage: positive"`). The `<task>` text is defined in `annotation/discretize_advantage.py`.
+- **Binary mode** (typical): `task_index=0` → `"<task>, Advantage: negative"`, `task_index=1` → `"<task>, Advantage: positive"` (e.g. `"fold the cloth, Advantage: positive"`). The `<task>` text is defined in `annotation/gt_label.py`.
 - **n_slices mode**: `task_index=i` → `"<task>, Advantage: {i}"`.
 
 ### Inference with an AWBC-trained model
@@ -278,7 +278,7 @@ At **inference** time you must use the **same prompt format** as in training. To
 
 ### Before training
 
-1. **Produce the advantage dataset:** Run Step 2 (eval) to get `data_PI06_100000/` or `data_KAI0_100000/` with advantage columns. Then run Step 3 (`discretize_advantage.sh` or `discretize_advantage.py --advantage-source absolute_advantage`); the script outputs a directory with `data/` (parquets with `task_index`), `meta/tasks.jsonl`, and `videos`. Use that directory as the advantage dataset (e.g. copy or link it to `./data/Task_A/advantage`).
+1. **Produce the advantage dataset:** Run Step 2 (eval) to get `data_PI06_100000/` or `data_KAI0_100000/` with advantage columns. Then run Step 3 (`gt_labeling.sh` or `gt_label.py --advantage-source absolute_advantage`); the script outputs a directory with `data/` (parquets with `task_index`), `meta/tasks.jsonl`, and `videos`. Use that directory as the advantage dataset (e.g. copy or link it to `./data/FlattenFold/advantage`).
 2. In `config.py`, set **`repo_id`** to that advantage dataset path and **`weight_loader`** to your π₀.5 base checkpoint for the AWBC config(s) you use.
 3. **Compute norm stats:**  
    `uv run python scripts/compute_norm_states_fast.py --config-name pi05_flatten_fold_awbc`  
@@ -317,8 +317,8 @@ stage_advantage/
 ├── README.md                          # This file
 ├── annotation/                        # Steps 0–3: labeling, estimator, eval, discretize
 │   ├── README.md
-│   ├── discretize_advantage.py        # Step 3: discretize advantage → task_index (positive/negative)
-│   ├── discretize_advantage.sh        # Step 3: batch wrapper for PI06/KAI0 variants
+│   ├── gt_label.py        # Step 3: discretize advantage → task_index (positive/negative)
+│   ├── gt_labeling.sh        # Step 3: batch wrapper for PI06/KAI0 variants
 │   ├── eval.py                        # Step 2: predict advantages with trained estimator
 │   └── evaluator.py                   # SimpleValueEvaluator: batched GPU inference
 └── awbc/                              # Step 4: AWBC

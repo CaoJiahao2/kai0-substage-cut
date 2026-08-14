@@ -9,7 +9,7 @@ Workflow:
    - **PyTorch checkpoints** (model.safetensors): use `arithmetic_torch.py`
 
 You need a working OpenPI environment (same as training): JAX/Flax for JAX, PyTorch + `safetensors` for PyTorch, and the `openpi` package.  
-Scripts: `split_data.py`, `dump_data.py`, `arithmetic.py` (JAX), `arithmetic_torch.py` (PyTorch). Shared helpers live in `arithmetic_common.py`.
+Scripts: `split_data.py`, `dump_data.py`, `arithmetic.py` (JAX), `arithmetic_torch.py` (PyTorch). Shared helpers live in `common.py`.
 
 Both `arithmetic.py` and `arithmetic_torch.py` support the same methods: **average**, **inverse_loss**, **gradient_descent**, **adaptive_gradient_descent**, **greedy**, and manual **--weights**.
 

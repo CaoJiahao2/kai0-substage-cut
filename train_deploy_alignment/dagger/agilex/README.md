@@ -80,7 +80,7 @@ Same idea as inference: start the policy server on the inference machine, then o
 Start the policy server (from repo root):
 
 ```bash
-uv run scripts/serve_policy.py policy:checkpoint --policy.config=<config> --policy.dir=<checkpoint_dir> [--port=8000]
+uv run scripts/infer/serve_policy.py policy:checkpoint --policy.config=<config> --policy.dir=<checkpoint_dir> [--port=8000]
 ```
 
 Connect the IPC to this machine (e.g. Ethernet). Note the server IP (e.g. `192.168.1.10`).

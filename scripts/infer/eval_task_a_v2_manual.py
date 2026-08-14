@@ -16,7 +16,7 @@ import pandas as pd
 from openpi.policies import policy_config as _policy_config
 from openpi.training import config as _config
 
-_INFER_VIZ_PATH = Path(__file__).with_name("infer_dataset_loss_viz.py")
+_INFER_VIZ_PATH = Path(__file__).resolve().parent.parent / "viz" / "infer_dataset_loss_viz.py"
 _INFER_VIZ_SPEC = importlib.util.spec_from_file_location("infer_dataset_loss_viz", _INFER_VIZ_PATH)
 if _INFER_VIZ_SPEC is None or _INFER_VIZ_SPEC.loader is None:
     raise RuntimeError(f"Failed to load helper module: {_INFER_VIZ_PATH}")

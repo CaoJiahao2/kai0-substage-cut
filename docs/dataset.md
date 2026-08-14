@@ -66,7 +66,7 @@ configs:
 
 ```bash
 pip install huggingface_hub
-python scripts/download_dataset.py
+python scripts/tools/download_dataset.py
 ```
 
 The dataset is saved under `./data` (FlattenFold, HangCloth, TeeShirtSort). Training and evaluation scripts expect this path by default.
@@ -74,7 +74,7 @@ The dataset is saved under `./data` (FlattenFold, HangCloth, TeeShirtSort). Trai
 **Optional:** Download only specific tasks or to a custom directory:
 
 ```bash
-python scripts/download_dataset.py --tasks FlattenFold HangCloth --local-dir /path/to/output
+python scripts/tools/download_dataset.py --tasks FlattenFold HangCloth --local-dir /path/to/output
 ```
 
 **Manual download (Hugging Face):**
@@ -111,7 +111,7 @@ This dataset is in [LeRobot](https://github.com/huggingface/lerobot) format (v2.
 ```python
 from lerobot.datasets.lerobot_dataset import LeRobotDataset  # adjust by version
 
-# After running scripts/download_dataset.py (default ./data)
+# After running scripts/tools/download_dataset.py (default ./data)
 dataset = LeRobotDataset("path/to/kai0/repo/data/FlattenFold/base")  # or local path to a task subset
 ```
 
