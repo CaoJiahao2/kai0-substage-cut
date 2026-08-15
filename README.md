@@ -187,6 +187,10 @@ python scripts/tools/download_dataset.py --tasks FlattenFold HangCloth TeeShirtS
 # 2)（可选）下载公开 checkpoint（→ ./checkpoints）
 python scripts/tools/download_checkpoints.py --tasks FlattenFold
 
+# 2.1)（可选）下载已训练价值模型（Advantage Estimator，→ ./value_model）
+python scripts/tools/download_value_model.py
+#      国内镜像：HF_ENDPOINT=https://hf-mirror.com python scripts/tools/download_value_model.py
+
 # 3) 配置训练：编辑 src/openpi/training/config.py
 #    - repo_id：设为数据集绝对路径，如 <root>/data/FlattenFold/base
 #    - weight_loader：设为 π₀.₅ 基座 checkpoint 路径
@@ -253,6 +257,25 @@ uv run torchrun --standalone --nproc_per_node=8 scripts/train_pytorch.py <config
 ```
 
 ### 8.4 价值模型与 AWBC
+
+**已训练价值模型（Advantage Estimator）下载**：仓库已发布训练好的 20000 步价值模型
+（`adv-flatten-fold-run16`，对应本地 `value_model/20000/` 推荐版，详见 `docs/results.md` § 3），
+权重约 7.5 GB（`model.safetensors` + `metadata.pt`，不含 optimizer），可一键下载：
+
+```bash
+# 直接下载（→ ./value_model/adv-flatten-fold-run16/）
+python scripts/tools/download_value_model.py
+
+# 国内网络走 hf-mirror.com 镜像
+HF_ENDPOINT=https://hf-mirror.com python scripts/tools/download_value_model.py
+
+# 自定义保存路径 / 下载整个 repo（含 README）
+python scripts/tools/download_value_model.py --local-dir ./value_model --folder adv-flatten-fold-run16
+```
+
+HF repo：`Jiahao28/Kai0-value-model`（公开）。下载后用价值模型做推理时，
+将 `stage_advantage/annotation/eval.py` 的 `MODELS_CONFIG_MAP` 中 `ckpt_dir`
+指向下载目录、`ckpt_steps=20000` 即可。
 
 ```bash
 # 价值模型（Stage Advantage Step 1）
